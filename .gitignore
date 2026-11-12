@@ -1,0 +1,71 @@
+# Python 虚拟环境与缓存
+.venv/
+.paddlex/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+.coverage
+htmlcov/
+*.py[cod]
+
+# IDE 配置
+.idea/
+
+# PyInstaller 构建产物
+build/
+dist/
+
+# 日志与临时文件
+*.log
+*.tmp
+*.temp
+*.bak
+*.orig
+*.swp
+*.zip
+*.7z
+*.rar
+*.exe
+*.msi
+~$*
+
+# 客户资料与导出文件；正式 Word 模板例外保留
+*.pdf
+*.doc
+*.docx
+*.png
+*.jpg
+*.jpeg
+*.bmp
+*.tif
+*.tiff
+*.webp
+*.gif
+!templates/
+!templates/个人证书及电子印章申请表.docx
+!templates/机构证章申请表.docx
+customer_data/
+test_data/
+outputs/
+ocr_results/
+seal_results/
+
+# 密钥、令牌及仅供本机使用的配置
+.env
+.env.*
+*.env
+*.pem
+*.key
+*.pfx
+*.p12
+*.keystore
+credentials*.json
+secrets*.json
+token*.txt
+config.local.*
+*.local.json
+
+# 含敏感历史的本机备份，禁止上传
+.private-backup/
