@@ -63,11 +63,15 @@ class SealPanel(ctk.CTkFrame):
             self.cards._parent_canvas.yview_scroll(-int(event.delta / 6) or (-1 if event.delta > 0 else 1), "units")
             return "break"
 
-    def clear(self):
+    def clear(self, preserve_selected=False):
         self.generation += 1
-        self.candidates = []
-        self.thumbnail_cache.clear()
-        self.selected = []
+        # 来源刷新只保留当前有效勾选项；新客户仍使用完整清空。
+        retained = [candidate for i, candidate in enumerate(self.candidates)
+                    if preserve_selected and i in self.selected and candidate.selectable]
+        self.candidates = retained
+        self.thumbnail_cache = {data: preview for data, preview in self.thumbnail_cache.items()
+                                if any(candidate.data == data for candidate in retained)}
+        self.selected = list(range(len(retained)))
         self.pdf_source = None
         self.pdf_loading = False
         for window in list(self.windows):
@@ -78,9 +82,14 @@ class SealPanel(ctk.CTkFrame):
             widget.destroy()
         self.status.configure(text="尚未选择印章；生成 Word 时采集框留空")
         self._refresh_source_label()
+        if retained:
+            self.status.configure(text=f"已保留 {len(retained)} 张勾选印章，可继续提取其他文件")
+            self.render()
 
     def reset_customer(self):
-        self.use_current_pdf()
+        self.source.set("当前申请表 PDF")
+        self.file = None
+        self.clear()
 
     def pdf_progress(self, token, text):
         if token == self.generation:
@@ -95,7 +104,7 @@ class SealPanel(ctk.CTkFrame):
     def use_current_pdf(self):
         self.source.set("当前申请表 PDF")
         self.file = None
-        self.clear()
+        self.clear(preserve_selected=True)
 
     def choose_file(self):
         selected = filedialog.askopenfilename(title="选择印章资料", filetypes=[("印章资料", "*.docx *.pdf *.png *.jpg *.jpeg")])
@@ -106,12 +115,12 @@ class SealPanel(ctk.CTkFrame):
                 return
             self.source.set("其他文件")
             self.file = path
-            self.clear()
+            self.clear(preserve_selected=True)
             self.status.configure(text=f"已选择 {self.file.name}，请点击提取印章")
 
     def extract(self):
         path = self.current_file() if self.source.get() == "当前申请表 PDF" else self.file
-        self.clear()
+        self.clear(preserve_selected=True)
         if path is None:
             self.status.configure(text="请先选择相应来源的文件")
             return
@@ -162,12 +171,19 @@ class SealPanel(ctk.CTkFrame):
                 if kind == "progress":
                     self.status.configure(text=payload)
                     continue
-                (self.candidates, notice), self.pdf_source = payload
+                (candidates, notice), pdf_source = payload
+                first_new = len(self.candidates)
+                self.candidates.extend(candidates)
+                self.pdf_source = pdf_source
                 break
             if self.pdf_source is not None:
                 self._install_pdf_source(self.pdf_source)
-            if path.suffix.lower() in {".png", ".jpg", ".jpeg"} and self.candidates:
-                self.selected = [0]
+            if path.suffix.lower() in {".png", ".jpg", ".jpeg"} and candidates:
+                if len(self.selected) < 3:
+                    self.selected.append(first_new)
+                    self.selected.sort()
+                else:
+                    notice = "图片已加入候选，但已有三张勾选印章；请先取消一张后再勾选新图片"
             self.status.configure(text=notice)
             self.render()
 
@@ -218,7 +234,8 @@ class SealPanel(ctk.CTkFrame):
 
     def _install_pdf_source(self, source):
         self.pdf_source = source
-        existing = {candidate.pdf_page for candidate in self.candidates}
+        # 保留的旧 PDF 成果已有原图字节，不参与当前 PDF 待框选页去重。
+        existing = {candidate.pdf_page for candidate in self.candidates if not candidate.selectable}
         for page in source.matches:
             if page not in existing and page in source.thumbnails:
                 candidate = candidate_from_bytes(source.thumbnails[page], f"PDF 第 {page} 页 · 待框选")
@@ -235,7 +252,7 @@ class SealPanel(ctk.CTkFrame):
             self.status.configure(text=f"请输入 1 至 {self.pdf_source.page_count} 之间的有效页码")
             return
         if index is None:
-            index = next((i for i, candidate in enumerate(self.candidates) if candidate.pdf_page == page), None)
+            index = next((i for i, candidate in enumerate(self.candidates) if candidate.pdf_page == page and not candidate.selectable), None)
         if index is not None and self.candidates[index].source_data is not None:
             try:
                 if file_signature(self.pdf_source.path) != self.pdf_source.signature:
@@ -246,6 +263,8 @@ class SealPanel(ctk.CTkFrame):
             self.crop(index)
             return
         token = self.generation
+        # 高清渲染期间允许列表排序，以对象身份定位，避免旧索引覆盖其他印章。
+        pending_candidate = self.candidates[index] if index is not None else None
         source = self.pdf_source
         queue = Queue()
         self.pdf_loading = True
@@ -271,7 +290,9 @@ class SealPanel(ctk.CTkFrame):
             if error:
                 self.status.configure(text=error)
                 return
-            target = index
+            target = next((i for i, item in enumerate(self.candidates) if item is pending_candidate), None)
+            if pending_candidate is not None and target is None:
+                return
             if target is None:
                 target = len(self.candidates)
                 self.candidates.append(replace(candidate, selectable=False, position=(page, 0, 0),
